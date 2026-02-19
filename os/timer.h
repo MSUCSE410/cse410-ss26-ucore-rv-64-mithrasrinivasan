@@ -5,6 +5,7 @@
 
 #define TICKS_PER_SEC (100)
 // QEMU
+// Cycles per second
 #define CPU_FREQ (12500000)
 
 uint64 get_cycle();

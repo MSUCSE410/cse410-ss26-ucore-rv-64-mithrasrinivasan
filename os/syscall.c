@@ -5,6 +5,8 @@
 #include "timer.h"
 #include "trap.h"
 
+int sys_task_info(TaskInfo *ti);
+
 uint64 sys_write(int fd, char *str, uint len)
 {
 	debugf("sys_write fd = %d str = %x, len = %d", fd, str, len);
@@ -40,6 +42,45 @@ uint64 sys_gettimeofday(TimeVal *val, int _tz)
 * LAB1: you may need to define sys_task_info here
 */
 
+
+static TaskStatus map_state(enum procstate s) {
+    switch (s) {
+    case UNUSED:  return UnInit;
+    case RUNNING: return Running;
+    case ZOMBIE:  return Exited;
+    default:      return Ready;   // USED, SLEEPING, RUNNABLE
+    }
+}
+
+int sys_task_info(TaskInfo *ti)
+{
+    if (ti == 0) return -1; //user passed null pointer so it fails
+
+    struct proc *p = curr_proc(); //get current process
+
+    ti->status = map_state(p->state); //process state
+
+    // Copy syscall counters
+    for (int i = 0; i < MAX_SYSCALL_NUM; i++) {
+        ti->syscall_times[i] = p->syscall_times[i]; //array counting freq of each syscall invoked
+    }
+
+    // "time" = ms since the process first started running
+    // If start_time_ms is 0
+    uint64 now = get_cycle() / (CPU_FREQ / 1000); // ms approximation
+    if (p->start_time_ms == 0) {
+        ti->time = 0;
+    } else {
+        ti->time = (int)(now - p->start_time_ms);
+    }
+
+    return 0;
+}
+
+
+
+
+
 extern char trap_page[];
 
 void syscall()
@@ -50,9 +91,17 @@ void syscall()
 			   trapframe->a3, trapframe->a4, trapframe->a5 };
 	tracef("syscall %d args = [%x, %x, %x, %x, %x, %x]", id, args[0],
 	       args[1], args[2], args[3], args[4], args[5]);
+
 	/*
 	* LAB1: you may need to update syscall counter for task info here
 	*/
+	
+	if (id >= 0 && id < MAX_SYSCALL_NUM) {
+        curr_proc()->syscall_times[id]++;
+    }
+	
+
+	
 	switch (id) {
 	case SYS_write:
 		ret = sys_write(args[0], (char *)args[1], args[2]);
@@ -66,9 +115,15 @@ void syscall()
 	case SYS_gettimeofday:
 		ret = sys_gettimeofday((TimeVal *)args[0], args[1]);
 		break;
+
 	/*
 	* LAB1: you may need to add SYS_taskinfo case here
 	*/
+	case SYS_taskinfo:
+  		ret = sys_task_info((TaskInfo *)args[0]);
+  		break;
+
+		
 	default:
 		ret = -1;
 		errorf("unknown syscall %d", id);

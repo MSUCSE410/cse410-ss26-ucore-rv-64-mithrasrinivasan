@@ -19,6 +19,7 @@ void timer_init()
 /// Set the next timer interrupt
 void set_next_timer()
 {
+	///interrupts every 10ms
 	const uint64 timebase = CPU_FREQ / TICKS_PER_SEC;
 	set_timer(get_cycle() + timebase);
 }
