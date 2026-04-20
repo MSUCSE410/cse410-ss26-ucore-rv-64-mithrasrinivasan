@@ -7,6 +7,10 @@
 
 #define NPROC (512)
 #define FD_BUFFER_SIZE (16)
+#define MAX_SYSCALL_NUM 500
+
+//chapter 5 addition
+#define BIG_STRIDE 0x7fffffff
 
 struct file;
 
@@ -44,8 +48,30 @@ struct proc {
 	uint64 max_page;
 	struct proc *parent; // Parent process
 	uint64 exit_code;
+
+	
+	uint64 stride;  // Current stride value for stride scheduling
+	uint64 pass; // Amount added to stride after this process runs once (BIG_STRIDE / priority)
+	uint64 priority; // Scheduling priority of the process; higher priority means it runs more often
+
+	unsigned int syscall_times[MAX_SYSCALL_NUM];
+	uint64 start_time_ms;
 	struct file *files[FD_BUFFER_SIZE];
 };
+
+
+typedef enum {
+	UnInit,
+	Ready,
+	Running,
+	Exited,
+} TaskStatus;
+
+typedef struct {
+	TaskStatus status;
+	unsigned int syscall_times[MAX_SYSCALL_NUM];
+	int time;
+} TaskInfo;
 
 int cpuid();
 struct proc *curr_proc();
