@@ -42,9 +42,11 @@ struct superblock {
 #define T_FILE 2 // File
 
 // On-disk inode structure
+// nlink tracks how many directory entries point to this file.
 struct dinode {
 	short type; // File type
-	short pad[3];
+	short nlink; // Number of hard links to this inode
+	short pad[2]; // Kept to preserve original struct size
 	// LAB4: you can reduce size of pad array and add link count below,
 	//       or you can just regard a pad as link count.
 	//       But keep in mind that you'd better keep sizeof(dinode) unchanged
@@ -77,6 +79,10 @@ struct inode;
 
 void fsinit();
 int dirlink(struct inode *, char *, uint);
+
+// Remove a directory entry by name from a directory inode.
+int dirunlink(struct inode *, char *);
+
 struct inode *dirlookup(struct inode *, char *, uint *);
 struct inode *ialloc(uint, short);
 struct inode *idup(struct inode *);

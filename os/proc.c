@@ -4,6 +4,7 @@
 #include "trap.h"
 #include "vm.h"
 #include "queue.h"
+#include "timer.h"
 
 struct proc pool[NPROC];
 __attribute__((aligned(16))) char kstack[NPROC][PAGE_SIZE];
@@ -37,6 +38,13 @@ void proc_init()
 		p->state = UNUSED;
 		p->kstack = (uint64)kstack[p - pool];
 		p->trapframe = (struct trapframe *)trapframe[p - pool];
+		memset(p->syscall_times, 0, sizeof(p->syscall_times));
+		p->start_time_ms = 0;
+
+		// initialize stride scheduling fields
+		p->stride = 0;
+		p->priority = 16;
+		p->pass = BIG_STRIDE / p->priority;
 	}
 	idle.kstack = (uint64)boot_stack_top;
 	idle.pid = IDLE_PID;
@@ -96,6 +104,13 @@ found:
 	memset((void *)p->files, 0, sizeof(struct file *) * FD_BUFFER_SIZE);
 	p->context.ra = (uint64)usertrapret;
 	p->context.sp = p->kstack + KSTACK_SIZE;
+	memset(p->syscall_times, 0, sizeof(p->syscall_times));
+	p->start_time_ms = 0;
+
+	// chapter 5 addition
+	p->stride = 0;
+	p->priority = 16;
+	p->pass = BIG_STRIDE / p->priority;
 	return p;
 }
 
@@ -117,29 +132,45 @@ int init_stdio(struct proc *p)
 //    via swtch back to the scheduler.
 void scheduler()
 {
-	struct proc *p;
+	struct proc *p;        // Used to scan through the process table
+	struct proc *best;     // The runnable process with the smallest stride
+
 	for (;;) {
-		/*int has_proc = 0;
+		best = 0;          // Start each scheduling round with no selected process
+
+		// Search all processes for the runnable one with the smallest stride.
 		for (p = pool; p < &pool[NPROC]; p++) {
-			if (p->state == RUNNABLE) {
-				has_proc = 1;
-				tracef("swtich to proc %d", p - pool);
-				p->state = RUNNING;
-				current_proc = p;
-				swtch(&idle.context, &p->context);
+			if (p->state != RUNNABLE)
+				continue;
+
+			// Pick this process if it is the first runnable one found,
+			// or if its stride is smaller than the current best choice.
+			if (best == 0 || p->stride < best->stride) {
+				best = p;
 			}
 		}
-		if(has_proc == 0) {
-			panic("all app are over!\n");
-		}*/
-		p = fetch_task();
-		if (p == NULL) {
+
+		// If no runnable process exists, all applications are finished.
+		if (best == 0) {
 			panic("all app are over!\n");
 		}
-		tracef("swtich to proc %d", p - pool);
-		p->state = RUNNING;
-		current_proc = p;
-		swtch(&idle.context, &p->context);
+
+		tracef("switch to proc %d", best - pool);
+
+		// Record the first time this process begins running.
+		if (best->start_time_ms == 0) {
+			best->start_time_ms = get_cycle() / (CPU_FREQ / 1000);
+		}
+
+		// Mark the chosen process as running and make it the current process.
+		best->state = RUNNING;
+		current_proc = best;
+
+		// Advance its stride after giving it CPU time.
+		best->stride += best->pass;
+
+		// Context switch from the idle scheduler context into the chosen process.
+		swtch(&idle.context, &best->context);
 	}
 }
 
@@ -162,7 +193,6 @@ void sched()
 void yield()
 {
 	current_proc->state = RUNNABLE;
-	add_task(current_proc);
 	sched();
 }
 
@@ -180,7 +210,7 @@ void freeproc(struct proc *p)
 	if (p->pagetable)
 		freepagetable(p->pagetable, p->max_page);
 	p->pagetable = 0;
-	for (int i = 0; i > FD_BUFFER_SIZE; i++) {
+	for (int i = 0; i < FD_BUFFER_SIZE; i++) {
 		if (p->files[i] != NULL) {
 			fileclose(p->files[i]);
 		}
@@ -216,7 +246,6 @@ int fork()
 	np->trapframe->a0 = 0;
 	np->parent = p;
 	np->state = RUNNABLE;
-	add_task(np);
 	return np->pid;
 }
 
@@ -297,7 +326,7 @@ int wait(int pid, int *code)
 			return -1;
 		}
 		p->state = RUNNABLE;
-		add_task(p);
+		//add_task(p);
 		sched();
 	}
 }

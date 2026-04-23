@@ -6,6 +6,8 @@
 
 #define NPROC (512)
 #define FD_BUFFER_SIZE (16)
+#define MAX_SYSCALL_NUM 500
+#define BIG_STRIDE 0x7fffffff
 
 struct file;
 
@@ -31,6 +33,19 @@ struct context {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+typedef enum {
+	UnInit,
+	Ready,
+	Running,
+	Exited,
+} TaskStatus;
+
+typedef struct {
+	TaskStatus status;
+	unsigned int syscall_times[MAX_SYSCALL_NUM];
+	int time;
+} TaskInfo;
+
 // Per-process state
 struct proc {
 	enum procstate state; // Process state
@@ -43,6 +58,13 @@ struct proc {
 	uint64 max_page;
 	struct proc *parent; // Parent process
 	uint64 exit_code;
+	unsigned int syscall_times[MAX_SYSCALL_NUM];
+	uint64 start_time_ms;
+
+	uint64 stride;
+	uint64 pass;
+	uint64 priority;
+
 	struct file *files
 		[FD_BUFFER_SIZE]; //File descriptor table, using to record the files opened by the process
 };
@@ -60,6 +82,7 @@ int wait(int, int *);
 void add_task(struct proc *);
 struct proc *pop_task();
 struct proc *allocproc();
+void freeproc(struct proc *);
 int fdalloc(struct file *);
 int init_stdio(struct proc *);
 int push_argv(struct proc *, char **);

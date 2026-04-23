@@ -114,6 +114,7 @@ struct inode *ialloc(uint dev, short type)
 		if (dip->type == 0) { // a free inode
 			memset(dip, 0, sizeof(*dip));
 			dip->type = type;
+			dip->nlink = 1; // A newly created file begins with one hard link
 			bwrite(bp);
 			brelse(bp);
 			return iget(dev, inum);
@@ -135,6 +136,7 @@ void iupdate(struct inode *ip)
 	bp = bread(ip->dev, IBLOCK(ip->inum, sb));
 	dip = (struct dinode *)bp->data + ip->inum % IPB;
 	dip->type = ip->type;
+	dip->nlink = ip->nlink; // Keep on-disk hard-link count synchronized with memory
 	dip->size = ip->size;
 	// LAB4: you may need to update link count here
 	memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
@@ -179,7 +181,7 @@ struct inode *idup(struct inode *ip)
 	return ip;
 }
 
-// Reads the inode from disk if necessary.
+// Load inode metadata from disk into the in-memory inode if needed.
 void ivalid(struct inode *ip)
 {
 	struct buf *bp;
@@ -188,6 +190,7 @@ void ivalid(struct inode *ip)
 		bp = bread(ip->dev, IBLOCK(ip->inum, sb));
 		dip = (struct dinode *)bp->data + ip->inum % IPB;
 		ip->type = dip->type;
+		ip->nlink = dip->nlink; // Load current hard-link count from disk
 		ip->size = dip->size;
 		// LAB4: You may need to get lint count here
 		memmove(ip->addrs, dip->addrs, sizeof(ip->addrs));
@@ -208,7 +211,7 @@ void ivalid(struct inode *ip)
 void iput(struct inode *ip)
 {
 	// LAB4: Unmark the condition and change link count variable name (nlink) if needed
-	if (ip->ref == 1 && ip->valid && 0 /*&& ip->nlink == 0*/) {
+	if (ip->ref == 1 && ip->valid && ip->nlink == 0) { // Only truly delete the file after all hard links are gone.
 		// inode has no links and no other references: truncate and free.
 		itrunc(ip);
 		ip->type = 0;
@@ -428,7 +431,48 @@ int dirlink(struct inode *dp, char *name, uint inum)
 	return 0;
 }
 
-// LAB4: You may want to add dirunlink here
+/**
+ * Remove a directory entry with the given name from a directory inode.
+ * This searches the directory for the matching filename, clears that
+ * directory entry, writes the cleared entry back to disk, and returns 0.
+ * If the name is not found, it returns -1.
+ */
+int dirunlink(struct inode *dp, char *name)
+{
+	int off;              // Byte offset of the current directory entry being checked
+	struct dirent de;     // Temporary buffer to hold one directory entry at a time
+
+	// Make sure the inode passed in is actually a directory.
+	if (dp->type != T_DIR)
+		panic("dirunlink not DIR");
+
+	// Scan through all directory entries in this directory.
+	for (off = 0; off < dp->size; off += sizeof(de)) {
+		// Read one directory entry from the directory inode.
+		if (readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+			panic("dirunlink read");
+
+		// Skip empty directory entries.
+		if (de.inum == 0)
+			continue;
+
+		// If this entry's name matches the target name, remove it.
+		if (strncmp(name, de.name, DIRSIZ) == 0) {
+			// Clear the directory entry so it no longer points to any inode.
+			memset(&de, 0, sizeof(de));
+
+			// Write the cleared directory entry back to the same offset.
+			if (writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+				panic("dirunlink write");
+
+			// Successfully removed the directory entry.
+			return 0;
+		}
+	}
+
+	// The requested name was not found in this directory.
+	return -1;
+}
 
 //Return the inode of the root directory
 struct inode *root_dir()

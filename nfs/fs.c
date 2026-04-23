@@ -196,6 +196,7 @@ void rsect(uint sec, void *buf)
 	}
 }
 
+// Allocate a new inode in the filesystem image and initialize link count to 1.
 uint ialloc(ushort type)
 {
 	uint inum = freeinode++;
@@ -204,6 +205,7 @@ uint ialloc(ushort type)
 	bzero(&din, sizeof(din));
 	din.type = xshort(type);
 	din.size = xint(0);
+	din.nlink = 1; // New filesystem image inode starts with one hard link
 	// LAB4: You may want to init link count here
 	winode(inum, &din);
 	return inum;
